@@ -125,12 +125,16 @@ quarterly_abn_ret <- stock_data %>%
 # When need to take the average per company for the abnormal returns and caluclate
 # the volatilities for the time series
 
+Historic_volatility <- stock_data %>%
+  group_by(TICKER) %>%
+  summarise(
+    hist_vol = sd(log_ret[ date >= as.Date("2019-01-01") & date <= as.Date("2020-01-01")], na.rm = TRUE) * sqrt(252)             
+  )
+
 daily_abn_ret_stats <- daily_abn_ret %>%
   group_by(TICKER) %>%
   summarise(
     n_obs_daily = n(),                                   
-    hist_vol = sd(stock_data$log_ret[
-      stock_data$date >= as.Date("2019-01-01") & stock_data$date <= as.Date("2020-01-01")], na.rm = TRUE) * sqrt(252),             
     vol = sd(log_ret, na.rm = TRUE) *sqrt(4),           
     idio_vol = sd(abn_log_ret, na.rm = TRUE)*sqrt(4),          
     daily_avg_abn_ret = mean(abn_log_ret, na.rm = TRUE) *100,   
@@ -145,7 +149,8 @@ quarterly_abn_ret_stats <- quarterly_abn_ret %>%
     .groups = "drop"
   )
 
-stock_stats_df <- left_join(daily_abn_ret_stats, quarterly_abn_ret_stats, by = "TICKER")
+stock_stats_df <- left_join(daily_abn_ret_stats, Historic_volatility)
+stock_stats_df <- left_join(stock_stats_df, quarterly_abn_ret_stats, by = "TICKER")
 
 ## 6. Join all three data frames now
 
@@ -254,19 +259,27 @@ knitr::kable(summary_stats, caption = "Table 1: Summary Statistics")
 ############# Question 2 #############################
 
 ############ Table 2 #################################
-
+Full_data_set$TRBC_Industry_Name <- as.factor(Full_data_set$TRBC_Industry_Name)
 
 # We create a data set with the quarterly abnormal returns, the ESG score, and the industry
 quarterly_esg_data <- Full_data_set %>%
   select(TICKER, Company_Name.y, quarterly_abn_ret, ESG_Score_FY2018, TRBC_Industry_Name) %>%
   filter(!is.na(quarterly_abn_ret) & !is.na(ESG_Score_FY2018) & !is.na(TRBC_Industry_Name))
 
+# Remove any rows that have duplicates in the TICKER and TRBC_Industry_Name columns
+quarterly_esg_data <- quarterly_esg_data %>%
+  distinct(TICKER, TRBC_Industry_Name, .keep_all = TRUE)
+
 # Regress the quarterly abnormal returns on the ESG score
 esg_regression <- lm(quarterly_abn_ret ~ ESG_Score_FY2018, data = quarterly_esg_data)
 summary(esg_regression)
 
+# Change industry_dummies to factors
+quarterly_esg_data$TRBC_Industry_Name <- as.factor(quarterly_esg_data$TRBC_Industry_Name)
+summary(quarterly_esg_data)
 # Regress the quarterly abnormal returns on the ESG score and industry_dummies
 industry_dummies <- model.matrix(~ TRBC_Industry_Name - 1, data = quarterly_esg_data)
+
 esg_industry_regression <- lm(quarterly_abn_ret ~ ESG_Score_FY2018 + industry_dummies, data = quarterly_esg_data)
 summary(esg_industry_regression)
 
@@ -278,6 +291,10 @@ quarterly_esg_controls_data <- Full_data_set %>%
   select(TICKER, quarterly_abn_ret, ESG_Score_FY2018, TRBC_Industry_Name, all_of(firm_controls)) %>%
   filter(!is.na(quarterly_abn_ret) & !is.na(ESG_Score_FY2018) & !is.na(TRBC_Industry_Name))
 
+# Remove any rows that have duplicates in the TICKER and TRBC_Industry_Name columns
+quarterly_esg_controls_data <- quarterly_esg_controls_data %>%
+  distinct(TICKER, TRBC_Industry_Name, .keep_all = TRUE)
+
 # remove rows with NAs
 quarterly_esg_controls_data <- quarterly_esg_controls_data %>%
   filter(complete.cases(.))
@@ -285,6 +302,8 @@ quarterly_esg_controls_data <- quarterly_esg_controls_data %>%
 # Change the column name "Cash_and_Short-Term_Investments" to "Cash_and_Short_Term_Investments"
 quarterly_esg_controls_data <- quarterly_esg_controls_data %>%
   rename(Cash_and_Short_Term_Investments = `Cash_and_Short-Term_Investments`)
+
+summary(quarterly_esg_controls_data)
 
 # Regress the quarterly abnormal returns on the ESG, firm controls, and industry dummies
 esg_firm_controls_regression <- lm(
@@ -298,8 +317,8 @@ esg_firm_controls_regression <- lm(
 )
 summary(esg_firm_controls_regression)
 str(quarterly_esg_controls_data)
-
 summary(quarterly_esg_controls_data)
+summary(quarterly_esg_controls_data$TRBC_Industry_Name)
 
 # For each of the three regression models, we will make the standard errors heteroskedasticity robust using white 
 # standard errors.
@@ -316,42 +335,26 @@ esg_industry_regression_robust <- coeftest(esg_industry_regression, vcov = vcovH
 esg_firm_controls_regression_robust <- coeftest(esg_firm_controls_regression, vcov = vcovHC(esg_firm_controls_regression, type = "HC1"))
 
 # For each of the three regression models, we will create a table using the stargazer package.
-
-# Step 1: Install and load the stargazer package if you haven't already
 if (!require("stargazer")) install.packages("stargazer")
 library(stargazer)
 
-# Step 2: Assume your three regression models have been created
-# esg_regression <- lm(...)
-# esg_industry_regression <- lm(...)
-# esg_firm_controls_regression <- lm(...)
-
-# Step 3: Place your models into a list for stargazer
+# Place your models into a list for stargazer
 model_list <- list(esg_regression_robust, esg_industry_regression_robust, esg_firm_controls_regression_robust)
 
-# Step 4: Create a vector of labels for the final table.
-# The order must match the sequence of variables across your models.
-# Note: The variable name for firm size is 'Company_Market_Cap_USD' and for cash is
-# 'Cash_and_Short_Term_Investments' as per your regression code.
+# Create a vector of labels for the final table.
 covariate_labels <- c("ES", "Tobin's q", "Size", "Cash", "Leverage", "ROE",
                       "Advertising", "Historical volatility", "Dividend")
 
-# Step 5: Generate the table
-stargazer(
+# Generate the table
+table_2 <- stargazer(
   model_list,
   type = "text", # Use "html" or "latex" for reports; "text" for console output
   title = "Cross-sectional regressions for quarterly abnormal returns",
   
   # --- Column & Row Labels ---
-  column.labels = c("(1)", "(2)", "(3)"),
+  column.labels = c("Abnormal Ret.", "Abnormal Ret.", "Abnormal Ret."),
   covariate.labels = covariate_labels,
   dep.var.labels.include = FALSE, # We will add the dependent var manually
-  
-  # --- Statistics Reporting ---
-  # By default, stargazer shows standard errors. The t-statistic is shown
-  # in the image, but stargazer does not have a simple switch for this.
-  # For simplicity, this code shows standard errors, which is standard practice.
-  # To show t-stats, you would need to calculate them manually and pass them to the 'se' argument.
   
   # --- Table Content & Layout ---
   omit = c("Constant", "industry_dummies", "TRBC_Industry_Name"), # Hide intercept and fixed effects coefficients
@@ -368,15 +371,6 @@ stargazer(
   notes.append = TRUE
 )
 
-
-
-
-
-
-
-
-
-
 # Assuming esg_industry_regression is your regression model object
 # (e.g., from lm() or similar)
 
@@ -389,10 +383,6 @@ problematic_obs_indices <- c(14, 47, 55, 61, 117, 120, 141, 157, 182, 253) # Add
 
 # Method A: Using model.frame() (most robust if you didn't save the original data frame)
 original_data <- model.frame(esg_industry_regression)
-
-# Method B: If you know the name of your original data frame
-# For example, if your model was `lm(Y ~ X1 + X2, data = my_data_frame)`
-# original_data <- my_data_frame
 
 # 3. Examine the problematic observations
 cat("--- Problematic Observations (Raw Data) ---\n")
@@ -408,7 +398,6 @@ print(hat_values[problematic_obs_indices])
 cat("\n--- Summary of Hat Values (Overall Distribution) ---\n")
 summary(hat_values)
 
-# You can also plot hat values to visualize their distribution
 plot(hat_values, main = "Hat Values (Leverage Scores)",
      xlab = "Observation Index", ylab = "Hat Value")
 points(problematic_obs_indices, hat_values[problematic_obs_indices], col = "red", pch = 16)
@@ -418,27 +407,135 @@ text(problematic_obs_indices, hat_values[problematic_obs_indices],
      labels = problematic_obs_indices, pos = 3, col = "red")
 
 # 5. Compare problematic observations to the overall distribution
-# It's useful to see how the values of the problematic observations compare to the
-# mean/median and range of the entire dataset for each variable.
 
 cat("\n--- Summary Statistics of All Variables in the Model ---\n")
 summary(original_data)
 
-# You can also look at individual variable distributions, e.g., for 'X1'
-# hist(original_data$X1)
-# boxplot(original_data$X1)
-# You might want to highlight the problematic observations on these plots.
+############## Table 4 ######################################
+Full_data_set$TRBC_Industry_Name <- as.factor(Full_data_set$TRBC_Industry_Name)
 
-# Example: Focusing on a specific predictor variable (replace 'Your_Predictor_Variable'
-# with an actual column name from your model)
-# If your model formula was Y ~ X1 + X2 + X3
-# cat("\n--- Values of 'X1' for Problematic Observations ---\n")
-# print(original_data$X1[problematic_obs_indices])
-# cat("Mean of 'X1': ", mean(original_data$X1), "\n")
-# cat("Median of 'X1': ", median(original_data$X1), "\n")
-# cat("Max of 'X1': ", max(original_data$X1), "\n")
-# cat("Min of 'X1': ", min(original_data$X1), "\n")
+# We create a data set with the quarterly abnormal returns, the ESG score, and the industry
+quarterly_esg_data_vol <- Full_data_set %>%
+  select(TICKER, Company_Name.y, vol, idio_vol, ESG_Score_FY2018, TRBC_Industry_Name) %>%
+  filter(!is.na(vol) & !is.na(idio_vol) & !is.na(ESG_Score_FY2018) & !is.na(TRBC_Industry_Name))
 
-# Repeat this for other key predictor variables.
+# Remove any rows that have duplicates in the TICKER and TRBC_Industry_Name columns
+quarterly_esg_data_vol <- quarterly_esg_data_vol %>%
+  distinct(TICKER, TRBC_Industry_Name, .keep_all = TRUE)
 
+# Regress the vol on the ESG score
+esg_regression_vol <- lm(vol ~ ESG_Score_FY2018, data = quarterly_esg_data_vol)
+summary(esg_regression_vol)
 
+# Regress the idio vol on the ESG score
+esg_regression_idio_vol <- lm(idio_vol ~ ESG_Score_FY2018, data = quarterly_esg_data_vol)
+summary(esg_regression_idio_vol)
+
+# Change industry_dummies to factors
+quarterly_esg_data_vol$TRBC_Industry_Name <- as.factor(quarterly_esg_data_vol$TRBC_Industry_Name)
+summary(quarterly_esg_data_vol)
+# Regress the quarterly abnormal returns on the ESG score and industry_dummies
+industry_dummies <- model.matrix(~ TRBC_Industry_Name - 1, data = quarterly_esg_data_vol)
+
+esg_industry_regression_vol <- lm(vol ~ ESG_Score_FY2018 + industry_dummies, data = quarterly_esg_data_vol)
+summary(esg_industry_regression_vol)
+
+esg_industry_regression_idio_vol <- lm(idio_vol ~ ESG_Score_FY2018 + industry_dummies, data = quarterly_esg_data_vol)
+summary(esg_industry_regression_idio_vol)
+
+# Regress the quarterly abnormal returns on the ESG score, firm controls, and industry dummies
+firm_controls <- c("tobin_q", "Company_Market_Cap_USD", "Cash_and_Short-Term_Investments", 
+                   "Leverage", "ROE", "Advertising_Expense", "hist_vol", "Dividend_yield")
+
+quarterly_esg_controls_data_vol <- Full_data_set %>%
+  select(TICKER, vol, idio_vol, ESG_Score_FY2018, TRBC_Industry_Name, all_of(firm_controls)) %>%
+  filter(!is.na(vol) & !is.na(idio_vol) & !is.na(ESG_Score_FY2018) & !is.na(TRBC_Industry_Name))
+
+# Remove any rows that have duplicates in the TICKER and TRBC_Industry_Name columns
+quarterly_esg_controls_data_vol <- quarterly_esg_controls_data_vol %>%
+  distinct(TICKER, TRBC_Industry_Name, .keep_all = TRUE)
+
+# remove rows with NAs
+quarterly_esg_controls_data_vol <- quarterly_esg_controls_data_vol %>%
+  filter(complete.cases(.))
+
+# Change the column name "Cash_and_Short-Term_Investments" to "Cash_and_Short_Term_Investments"
+quarterly_esg_controls_data_vol <- quarterly_esg_controls_data_vol %>%
+  rename(Cash_and_Short_Term_Investments = `Cash_and_Short-Term_Investments`)
+
+# Regress the quarterly abnormal returns on the ESG, firm controls, and industry dummies
+esg_firm_controls_regression_vol <- lm(
+  vol ~ ESG_Score_FY2018 + 
+    tobin_q + Company_Market_Cap_USD + 
+    Cash_and_Short_Term_Investments + 
+    Leverage + ROE + Advertising_Expense + 
+    hist_vol + Dividend_yield + 
+    TRBC_Industry_Name, 
+  data = quarterly_esg_controls_data_vol
+)
+
+esg_firm_controls_regression_idio_vol <- lm(
+  idio_vol ~ ESG_Score_FY2018 + 
+    tobin_q + Company_Market_Cap_USD + 
+    Cash_and_Short_Term_Investments + 
+    Leverage + ROE + Advertising_Expense + 
+    hist_vol + Dividend_yield + 
+    TRBC_Industry_Name, 
+  data = quarterly_esg_controls_data_vol
+)
+summary(esg_firm_controls_regression_vol)
+summary(esg_firm_controls_regression_idio_vol)
+
+# For each of the three regression models, we will make the standard errors heteroskedasticity robust using white 
+# standard errors.
+
+# Load the necessary package for robust standard errors
+if (!require("sandwich")) install.packages("sandwich")
+library(sandwich)
+# Load the necessary package for robust standard errors
+if (!require("lmtest")) install.packages("lmtest")
+library(lmtest)
+# Step 1: Calculate robust standard errors for each model
+esg_regression_robust_vol <- coeftest(esg_regression_idio_vol, vcov = vcovHC(esg_regression_idio_vol, type = "HC1"))
+esg_regression_robust_idio_vol <- coeftest(esg_regression_idio_vol, vcov = vcovHC(esg_regression_idio_vol, type = "HC1"))
+
+esg_industry_regression_robust_vol <- coeftest(esg_industry_regression_vol, vcov = vcovHC(esg_industry_regression_vol, type = "HC1"))
+esg_industry_regression_robust_idio_vol <- coeftest(esg_industry_regression_idio_vol, vcov = vcovHC(esg_industry_regression_idio_vol, type = "HC1"))
+
+esg_firm_controls_regression_robust_vol <- coeftest(esg_firm_controls_regression_vol, vcov = vcovHC(esg_firm_controls_regression_vol, type = "HC1"))
+esg_firm_controls_regression_robust_idio_vol <- coeftest(esg_firm_controls_regression_idio_vol, vcov = vcovHC(esg_firm_controls_regression_idio_vol, type = "HC1"))
+
+# Place your models into a list for stargazer
+model_list_vol <- list(esg_regression_robust_vol, esg_industry_regression_robust_vol, 
+                       esg_firm_controls_regression_robust_vol, esg_regression_robust_idio_vol, 
+                       esg_industry_regression_robust_idio_vol, esg_firm_controls_regression_robust_idio_vol)
+
+# Create a vector of labels for the final table.
+covariate_labels_vol <- c("ES", "Tobin's q", "Size", "Cash", "Leverage", "ROE",
+                      "Advertising", "Historical volatility", "Dividend")
+
+# Generate the table
+table_4 <- stargazer(
+  model_list_vol,
+  type = "text", # Use "html" or "latex" for reports; "text" for console output
+  title = "Cross-sectional regressions for quarterly abnormal returns",
+  
+  # --- Column & Row Labels ---
+  column.labels = c("Volatility", "Volatility", "Volatility", "Idio. Volatility", "Idio. Volatility", "Idio. Volatility"),
+  covariate.labels = covariate_labels_vol,
+  dep.var.labels.include = FALSE, # We will add the dependent var manually
+  
+  # --- Table Content & Layout ---
+  omit = c("Constant", "industry_dummies", "TRBC_Industry_Name"), # Hide intercept and fixed effects coefficients
+  add.lines = list(c("Industry FE", "No", "Yes", "Yes", "No", "Yes", "Yes")),
+  align = TRUE,
+  
+  # --- Model Statistics to Include ---
+  keep.stat = c("n", "adj.rsq"), # Show number of observations and Adj. R-squared
+  
+  # --- Notes and Significance Stars ---
+  star.cutoffs = c(0.1, 0.05, 0.01), # p-value thresholds for *, **, ***
+  notes.align = "l",
+  notes = "Standard errors are in parentheses.",
+  notes.append = TRUE
+)
