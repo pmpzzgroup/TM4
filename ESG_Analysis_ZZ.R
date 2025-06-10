@@ -77,6 +77,7 @@ stock_data <- stock_data %>%
 # Regression for each Company
 
 beta_df <- stock_data %>%
+  filter(date <= as.Date("2020-01-01")) %>%
   group_by(TICKER) %>%
   filter(!is.na(log_ret) & !is.na(mkt_log_ret)) %>%
   do(tidy(lm(log_ret ~ mkt_log_ret, data = .))) %>%
@@ -87,23 +88,31 @@ beta_df <- stock_data %>%
 
 stock_data <- left_join(stock_data, beta_df, by = "TICKER")
 
-#Calculate the abnormal daily log return
+## 3. Daily Abnormal Log Returns First Quarter 2020 ##
 
 stock_data <- stock_data %>%
   mutate(
-    abn_ret = log_ret - beta * mkt_log_ret
+    abn_log_ret = log_ret - (beta * mkt_log_ret)
   )
 
-## 4. Quarterly Abnormal Log Returns ## 
+daily_abn_ret<- stock_data %>%
+  filter(date >= as.Date("2020-01-01") & date <= as.Date("2020-03-31")) %>%
+  filter(!is.na(log_ret) & !is.na(mkt_log_ret) & !is.na(beta)) %>%
+  mutate(
+    abn_log_ret = log_ret - (beta * mkt_log_ret)
+    )
+
+## 4. Quarterly Abnormal Log Return First Quarter 2020 ## 
 
 quarterly_abn_ret <- stock_data %>%
+  filter(date >= as.Date("2020-01-01") & date <= as.Date("2020-03-31")) %>%
   mutate(
     year = format(date, "%Y"),
     quarter = paste0("Q", lubridate::quarter(date))
   ) %>%
   group_by(TICKER, year, quarter) %>%
   summarise(
-    qtr_abn_log_return = sum(abn_ret, na.rm = TRUE),
+    qtr_abn_log_return = sum(abn_log_ret, na.rm = TRUE),
     .groups = "drop"
   )
 
@@ -112,19 +121,18 @@ quarterly_abn_ret <- stock_data %>%
 # When need to take the average per company for the abnormal returns and caluclate
 # the volatilities for the time series
 
-
-stock_stats_df <- stock_data %>%
+daily_abn_ret_stats <- daily_abn_ret %>%
   group_by(TICKER) %>%
   summarise(
     n_obs_daily = n(),                                   
     hist_vol = sd(RET, na.rm = TRUE),              
-    vol = sd(log_ret, na.rm = TRUE),           
-    idio_vol = sd(abn_ret, na.rm = TRUE),          
-    daily_abn_ret = mean(abn_ret, na.rm = TRUE),   
+    vol = sd(abn_log_ret, na.rm = TRUE),           
+    idio_vol = sd(abn_log_ret, na.rm = TRUE),          
+    daily_avg_abn_ret = mean(abn_log_ret, na.rm = TRUE),   
     .groups = "drop"
   )
 
-stock_stats_q_df <- quarterly_abn_ret %>%
+quarterly_abn_ret_stats <- quarterly_abn_ret %>%
   group_by(TICKER) %>%
   summarise(
     n_obs_quarter = n(),                                   
@@ -132,7 +140,7 @@ stock_stats_q_df <- quarterly_abn_ret %>%
     .groups = "drop"
   )
 
-stock_stats_df <- left_join(stock_stats_df, stock_stats_q_df , by = "TICKER")
+stock_stats_df <- left_join(daily_abn_ret_stats, quarterly_abn_ret_stats, by = "TICKER")
 
 ## 6. Join all three data frames now
 
@@ -146,3 +154,29 @@ esg_data <- esg_data %>%
 # Join to one data frame
 Full_data_set <- left_join(compustat_data, esg_data, by = "TICKER" )
 Full_data_set <- left_join(Full_data_set,stock_stats_df , by = "TICKER" )
+
+
+## 7. Calculate Corporate Finance Indicators:
+
+# Rename for easier handling
+original_names <- names(Full_data_set)
+cleaned_names <- gsub("\\r\\n", "", original_names)
+cleaned_names <- gsub(" ", "_", cleaned_names) 
+names(Full_data_set) <- cleaned_names
+
+
+Full_data_set <- Full_data_set %>%
+  mutate(
+    tobin_q = (`Company_Market_Cap(USD)` + `Debt_in_Current_Liabilities_-_Total` + `Long-Term_Debt_-_Total`) / `Assets_-_Total`,
+    Leverage = (`Debt_in_Current_Liabilities_-_Total` + `Long-Term_Debt_-_Total`) / `Assets_-_Total`,
+    ROE = `Net_Income_(Loss)` / `Common/Ordinary_Equity_-_Total`,
+    Dividend_yield = `Dividends_per_Share_-_Ex-Date_-_Fiscal` / `Price_Close_-_Annual_-_Calendar`
+  )
+
+## 8. Winsorize the statistics at 1% level ##
+
+winsorize <- function(x, p = 0.01) {
+  quantiles <- quantile(x, probs = c(p, 1 - p), na.rm = TRUE)
+  pmax(pmin(x, quantiles[2]), quantiles[1])
+}
+
