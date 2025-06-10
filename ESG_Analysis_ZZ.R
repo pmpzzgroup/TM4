@@ -1,6 +1,10 @@
 
 ### Needed Libraries ###
 
+options(scipen = 999) # Disable scientific notation
+
+load("TM4_data.RData")
+
 library(dplyr)
 library(broom)
 library(tidyr)
@@ -126,10 +130,11 @@ daily_abn_ret_stats <- daily_abn_ret %>%
   group_by(TICKER) %>%
   summarise(
     n_obs_daily = n(),                                   
-    hist_vol = sd(RET, na.rm = TRUE),              
-    vol = sd(abn_log_ret, na.rm = TRUE),           
-    idio_vol = sd(abn_log_ret, na.rm = TRUE),          
-    daily_avg_abn_ret = mean(abn_log_ret, na.rm = TRUE),   
+    hist_vol = sd(stock_data$log_ret[
+      stock_data$date >= as.Date("2019-01-01") & stock_data$date <= as.Date("2020-01-01")], na.rm = TRUE) * sqrt(252),             
+    vol = sd(log_ret, na.rm = TRUE) *sqrt(4),           
+    idio_vol = sd(abn_log_ret, na.rm = TRUE)*sqrt(4),          
+    daily_avg_abn_ret = mean(abn_log_ret, na.rm = TRUE) *100,   
     .groups = "drop"
   )
 
@@ -137,7 +142,7 @@ quarterly_abn_ret_stats <- quarterly_abn_ret %>%
   group_by(TICKER) %>%
   summarise(
     n_obs_quarter = n(),                                   
-    quarterly_abn_ret = mean(qtr_abn_log_return, na.rm = TRUE), 
+    quarterly_abn_ret = mean(qtr_abn_log_return, na.rm = TRUE) *100, 
     .groups = "drop"
   )
 
@@ -170,10 +175,15 @@ names(Full_data_set) <- cleaned_names
 
 Full_data_set <- Full_data_set %>%
   mutate(
-    tobin_q = (`Company_Market_Cap_USD` + `Debt_in_Current_Liabilities_-_Total` + `Long-Term_Debt_-_Total`) / `Assets_-_Total`,
+    Market_Equity = Company_Market_Cap_USD / 1000000,
+    tobin_q = (`Assets_-_Total` - `Common/Ordinary_Equity_-_Total` + Market_Equity) / `Assets_-_Total`,
     Leverage = (`Debt_in_Current_Liabilities_-_Total` + `Long-Term_Debt_-_Total`) / `Assets_-_Total`,
     ROE = `Net_Income__Loss` / `Common/Ordinary_Equity_-_Total`,
-    Dividend_yield = `Dividends_per_Share_-_Ex-Date_-_Fiscal` / `Price_Close_-_Annual_-_Calendar`
+    Dividend_yield = `Dividends_per_Share_-_Ex-Date_-_Fiscal` / `Price_Close_-_Annual_-_Calendar` * 100,
+    Size = log(1+`Sales/Turnover__Net`),
+    Cash = `Cash_and_Short-Term_Investments` / `Assets_-_Total`,
+    Advertising = Advertising_Expense / `Assets_-_Total`,
+    ESG = ESG_Score_FY2018 / 100
   )
 
 ## 8. Winsorize Function the at 1% level ##
@@ -189,13 +199,13 @@ summary_vars <- Full_data_set %>%
   select(
     TICKER,
     quarterly_abn_ret, 
-    `ESG_Score_FY2018`, 
+    ESG, 
     tobin_q, 
-    Company_Market_Cap_USD, 
-    `Cash_and_Short-Term_Investments`, 
+    Size, 
+    Cash, 
     Leverage, 
     ROE, 
-    Advertising_Expense, 
+    Advertising, 
     hist_vol, 
     Dividend_yield, 
     vol, 
@@ -205,11 +215,11 @@ summary_vars <- Full_data_set %>%
     n_obs_quarter) %>%
   mutate(across(
     c(tobin_q, 
-      Company_Market_Cap_USD, 
-      `Cash_and_Short-Term_Investments`, 
+      Size, 
+      Cash, 
       Leverage, 
       ROE, 
-      Advertising_Expense),
+      Advertising),
     \(x) winsorize(x, p = 0.01)
   ))
 
@@ -233,3 +243,11 @@ summary_stats <- summary_vars %>%
     names_pattern = "^(.*)_(Obs|Mean|SD|25%|Median|75%)$"
   )
 
+summary_stats$Obs[nrow(summary_stats)] <- sum(summary_vars$n_obs_daily, na.rm= TRUE)
+
+
+
+summary_stats <- summary_stats %>%
+  mutate(across(where(is.numeric), ~ round(.x, 3)))
+
+knitr::kable(summary_stats, caption = "Table 1: Summary Statistics")
