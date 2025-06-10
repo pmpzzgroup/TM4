@@ -3,6 +3,7 @@
 
 library(dplyr)
 library(broom)
+library(tidyr)
 
 ### Task 1: Merging the datasets ###
 
@@ -161,22 +162,74 @@ Full_data_set <- left_join(Full_data_set,stock_stats_df , by = "TICKER" )
 # Rename for easier handling
 original_names <- names(Full_data_set)
 cleaned_names <- gsub("\\r\\n", "", original_names)
-cleaned_names <- gsub(" ", "_", cleaned_names) 
+cleaned_names <- gsub(" ", "_", cleaned_names)
+cleaned_names <- gsub("\\(", "_", cleaned_names)  # Escaped (
+cleaned_names <- gsub("\\)", "", cleaned_names)   # Escaped )
 names(Full_data_set) <- cleaned_names
 
 
 Full_data_set <- Full_data_set %>%
   mutate(
-    tobin_q = (`Company_Market_Cap(USD)` + `Debt_in_Current_Liabilities_-_Total` + `Long-Term_Debt_-_Total`) / `Assets_-_Total`,
+    tobin_q = (`Company_Market_Cap_USD` + `Debt_in_Current_Liabilities_-_Total` + `Long-Term_Debt_-_Total`) / `Assets_-_Total`,
     Leverage = (`Debt_in_Current_Liabilities_-_Total` + `Long-Term_Debt_-_Total`) / `Assets_-_Total`,
-    ROE = `Net_Income_(Loss)` / `Common/Ordinary_Equity_-_Total`,
+    ROE = `Net_Income__Loss` / `Common/Ordinary_Equity_-_Total`,
     Dividend_yield = `Dividends_per_Share_-_Ex-Date_-_Fiscal` / `Price_Close_-_Annual_-_Calendar`
   )
 
-## 8. Winsorize the statistics at 1% level ##
+## 8. Winsorize Function the at 1% level ##
 
 winsorize <- function(x, p = 0.01) {
   quantiles <- quantile(x, probs = c(p, 1 - p), na.rm = TRUE)
   pmax(pmin(x, quantiles[2]), quantiles[1])
 }
+
+## 9. Redo the summary table ##
+
+summary_vars <- Full_data_set %>%
+  select(
+    TICKER,
+    quarterly_abn_ret, 
+    `ESG_Score_FY2018`, 
+    tobin_q, 
+    Company_Market_Cap_USD, 
+    `Cash_and_Short-Term_Investments`, 
+    Leverage, 
+    ROE, 
+    Advertising_Expense, 
+    hist_vol, 
+    Dividend_yield, 
+    vol, 
+    idio_vol, 
+    daily_avg_abn_ret,
+    n_obs_daily,
+    n_obs_quarter) %>%
+  mutate(across(
+    c(tobin_q, 
+      Company_Market_Cap_USD, 
+      `Cash_and_Short-Term_Investments`, 
+      Leverage, 
+      ROE, 
+      Advertising_Expense),
+    \(x) winsorize(x, p = 0.01)
+  ))
+
+
+summary_stats <- summary_vars %>%
+  summarise(across(
+    -c(TICKER, n_obs_daily, n_obs_quarter),
+    list(
+      Obs = ~ sum(!is.na(.)),
+      Mean = ~ mean(., na.rm = TRUE),
+      SD = ~ sd(., na.rm = TRUE),
+      `25%` = ~ quantile(., 0.25, na.rm = TRUE),
+      Median = ~ quantile(., 0.5, na.rm = TRUE),
+      `75%` = ~ quantile(., 0.75, na.rm = TRUE)
+    ),
+    .names = "{.col}_{.fn}"
+  )) %>%
+  pivot_longer(
+    everything(),
+    names_to = c("Variable", ".value"),
+    names_pattern = "^(.*)_(Obs|Mean|SD|25%|Median|75%)$"
+  )
 
