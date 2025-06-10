@@ -1,5 +1,8 @@
-
 ### Needed Libraries ###
+
+options(scipen = 999) # Disable scientific notation
+
+load("TM4_data.RData")
 
 library(dplyr)
 library(broom)
@@ -101,7 +104,7 @@ daily_abn_ret<- stock_data %>%
   filter(!is.na(log_ret) & !is.na(mkt_log_ret) & !is.na(beta)) %>%
   mutate(
     abn_log_ret = log_ret - (beta * mkt_log_ret)
-    )
+  )
 
 ## 4. Quarterly Abnormal Log Return First Quarter 2020 ## 
 
@@ -126,10 +129,11 @@ daily_abn_ret_stats <- daily_abn_ret %>%
   group_by(TICKER) %>%
   summarise(
     n_obs_daily = n(),                                   
-    hist_vol = sd(RET, na.rm = TRUE),              
-    vol = sd(abn_log_ret, na.rm = TRUE),           
-    idio_vol = sd(abn_log_ret, na.rm = TRUE),          
-    daily_avg_abn_ret = exp(mean(abn_log_ret, na.rm = TRUE)) - 1,   
+    hist_vol = sd(stock_data$log_ret[
+      stock_data$date >= as.Date("2019-01-01") & stock_data$date <= as.Date("2020-01-01")], na.rm = TRUE) * sqrt(252),             
+    vol = sd(log_ret, na.rm = TRUE) *sqrt(4),           
+    idio_vol = sd(abn_log_ret, na.rm = TRUE)*sqrt(4),          
+    daily_avg_abn_ret = mean(abn_log_ret, na.rm = TRUE) *100,   
     .groups = "drop"
   )
 
@@ -137,7 +141,7 @@ quarterly_abn_ret_stats <- quarterly_abn_ret %>%
   group_by(TICKER) %>%
   summarise(
     n_obs_quarter = n(),                                   
-    quarterly_abn_ret = exp(mean(qtr_abn_log_return, na.rm = TRUE)) - 1, 
+    quarterly_abn_ret = mean(qtr_abn_log_return, na.rm = TRUE) *100, 
     .groups = "drop"
   )
 
@@ -170,10 +174,15 @@ names(Full_data_set) <- cleaned_names
 
 Full_data_set <- Full_data_set %>%
   mutate(
-    tobin_q = (`Company_Market_Cap_USD` + `Debt_in_Current_Liabilities_-_Total` + `Long-Term_Debt_-_Total`) / `Assets_-_Total`,
+    Market_Equity = Company_Market_Cap_USD / 1000000,
+    tobin_q = (`Assets_-_Total` - `Common/Ordinary_Equity_-_Total` + Market_Equity) / `Assets_-_Total`,
     Leverage = (`Debt_in_Current_Liabilities_-_Total` + `Long-Term_Debt_-_Total`) / `Assets_-_Total`,
     ROE = `Net_Income__Loss` / `Common/Ordinary_Equity_-_Total`,
-    Dividend_yield = `Dividends_per_Share_-_Ex-Date_-_Fiscal` / `Price_Close_-_Annual_-_Calendar`
+    Dividend_yield = `Dividends_per_Share_-_Ex-Date_-_Fiscal` / `Price_Close_-_Annual_-_Calendar` * 100,
+    Size = log(1+`Sales/Turnover__Net`),
+    Cash = `Cash_and_Short-Term_Investments` / `Assets_-_Total`,
+    Advertising = Advertising_Expense / `Assets_-_Total`,
+    ESG = ESG_Score_FY2018 / 100
   )
 
 ## 8. Winsorize Function the at 1% level ##
@@ -189,13 +198,13 @@ summary_vars <- Full_data_set %>%
   select(
     TICKER,
     quarterly_abn_ret, 
-    `ESG_Score_FY2018`, 
+    ESG, 
     tobin_q, 
-    Company_Market_Cap_USD, 
-    `Cash_and_Short-Term_Investments`, 
+    Size, 
+    Cash, 
     Leverage, 
     ROE, 
-    Advertising_Expense, 
+    Advertising, 
     hist_vol, 
     Dividend_yield, 
     vol, 
@@ -205,11 +214,11 @@ summary_vars <- Full_data_set %>%
     n_obs_quarter) %>%
   mutate(across(
     c(tobin_q, 
-      Company_Market_Cap_USD, 
-      `Cash_and_Short-Term_Investments`, 
+      Size, 
+      Cash, 
       Leverage, 
       ROE, 
-      Advertising_Expense),
+      Advertising),
     \(x) winsorize(x, p = 0.01)
   ))
 
@@ -232,6 +241,19 @@ summary_stats <- summary_vars %>%
     names_to = c("Variable", ".value"),
     names_pattern = "^(.*)_(Obs|Mean|SD|25%|Median|75%)$"
   )
+
+summary_stats$Obs[nrow(summary_stats)] <- sum(summary_vars$n_obs_daily, na.rm= TRUE)
+
+
+
+summary_stats <- summary_stats %>%
+  mutate(across(where(is.numeric), ~ round(.x, 3)))
+
+knitr::kable(summary_stats, caption = "Table 1: Summary Statistics")
+
+############# Question 2 #############################
+
+############ Table 2 #################################
 
 
 # We create a data set with the quarterly abnormal returns, the ESG score, and the industry
@@ -277,6 +299,24 @@ esg_firm_controls_regression <- lm(
 summary(esg_firm_controls_regression)
 str(quarterly_esg_controls_data)
 
+summary(quarterly_esg_controls_data)
+
+# For each of the three regression models, we will make the standard errors heteroskedasticity robust using white 
+# standard errors.
+
+# Load the necessary package for robust standard errors
+if (!require("sandwich")) install.packages("sandwich")
+library(sandwich)
+# Load the necessary package for robust standard errors
+if (!require("lmtest")) install.packages("lmtest")
+library(lmtest)
+# Step 1: Calculate robust standard errors for each model
+esg_regression_robust <- coeftest(esg_regression, vcov = vcovHC(esg_regression, type = "HC1"))
+esg_industry_regression_robust <- coeftest(esg_industry_regression, vcov = vcovHC(esg_industry_regression, type = "HC1"))
+esg_firm_controls_regression_robust <- coeftest(esg_firm_controls_regression, vcov = vcovHC(esg_firm_controls_regression, type = "HC1"))
+
+# For each of the three regression models, we will create a table using the stargazer package.
+
 # Step 1: Install and load the stargazer package if you haven't already
 if (!require("stargazer")) install.packages("stargazer")
 library(stargazer)
@@ -287,7 +327,7 @@ library(stargazer)
 # esg_firm_controls_regression <- lm(...)
 
 # Step 3: Place your models into a list for stargazer
-model_list <- list(esg_regression, esg_industry_regression, esg_firm_controls_regression)
+model_list <- list(esg_regression_robust, esg_industry_regression_robust, esg_firm_controls_regression_robust)
 
 # Step 4: Create a vector of labels for the final table.
 # The order must match the sequence of variables across your models.
@@ -327,5 +367,78 @@ stargazer(
   notes = "Standard errors are in parentheses.",
   notes.append = TRUE
 )
+
+
+
+
+
+
+
+
+
+
+# Assuming esg_industry_regression is your regression model object
+# (e.g., from lm() or similar)
+
+# 1. Manually list the problematic observation numbers from your warning message
+problematic_obs_indices <- c(14, 47, 55, 61, 117, 120, 141, 157, 182, 253) # Add more if your warning listed them
+
+# 2. Access the original data used to fit the model
+# The original data frame used to fit the model can often be extracted using model.frame()
+# or by directly referencing the data argument if you saved it.
+
+# Method A: Using model.frame() (most robust if you didn't save the original data frame)
+original_data <- model.frame(esg_industry_regression)
+
+# Method B: If you know the name of your original data frame
+# For example, if your model was `lm(Y ~ X1 + X2, data = my_data_frame)`
+# original_data <- my_data_frame
+
+# 3. Examine the problematic observations
+cat("--- Problematic Observations (Raw Data) ---\n")
+print(original_data[problematic_obs_indices, ])
+
+# 4. Calculate and inspect hat values (leverage scores)
+# Hat values are a good way to quantify influence.
+hat_values <- hatvalues(esg_industry_regression)
+
+cat("\n--- Hat Values for Problematic Observations ---\n")
+print(hat_values[problematic_obs_indices])
+
+cat("\n--- Summary of Hat Values (Overall Distribution) ---\n")
+summary(hat_values)
+
+# You can also plot hat values to visualize their distribution
+plot(hat_values, main = "Hat Values (Leverage Scores)",
+     xlab = "Observation Index", ylab = "Hat Value")
+points(problematic_obs_indices, hat_values[problematic_obs_indices], col = "red", pch = 16)
+abline(h = 2 * (length(coef(esg_industry_regression))) / nrow(original_data),
+       col = "blue", lty = 2) # Common cutoff for high leverage (2 * (p/n))
+text(problematic_obs_indices, hat_values[problematic_obs_indices],
+     labels = problematic_obs_indices, pos = 3, col = "red")
+
+# 5. Compare problematic observations to the overall distribution
+# It's useful to see how the values of the problematic observations compare to the
+# mean/median and range of the entire dataset for each variable.
+
+cat("\n--- Summary Statistics of All Variables in the Model ---\n")
+summary(original_data)
+
+# You can also look at individual variable distributions, e.g., for 'X1'
+# hist(original_data$X1)
+# boxplot(original_data$X1)
+# You might want to highlight the problematic observations on these plots.
+
+# Example: Focusing on a specific predictor variable (replace 'Your_Predictor_Variable'
+# with an actual column name from your model)
+# If your model formula was Y ~ X1 + X2 + X3
+# cat("\n--- Values of 'X1' for Problematic Observations ---\n")
+# print(original_data$X1[problematic_obs_indices])
+# cat("Mean of 'X1': ", mean(original_data$X1), "\n")
+# cat("Median of 'X1': ", median(original_data$X1), "\n")
+# cat("Max of 'X1': ", max(original_data$X1), "\n")
+# cat("Min of 'X1': ", min(original_data$X1), "\n")
+
+# Repeat this for other key predictor variables.
 
 
