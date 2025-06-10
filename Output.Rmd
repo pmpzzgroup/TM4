@@ -1,9 +1,24 @@
+---
+title: "TM4"
+author: "CW"
+date: "2025-06-10"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## R Markdown
+
+```{r}
+
+load("TM4_data.RData")
+
 
 ### Needed Libraries ###
 
 options(scipen = 999) # Disable scientific notation
-
-load("TM4_data.RData")
 
 library(dplyr)
 library(broom)
@@ -175,14 +190,12 @@ names(Full_data_set) <- cleaned_names
 
 Full_data_set <- Full_data_set %>%
   mutate(
-    Market_Equity = Company_Market_Cap_USD / 1000000,
-    tobin_q = (`Assets_-_Total` - `Common/Ordinary_Equity_-_Total` + Market_Equity) / `Assets_-_Total`,
+    Market_Equity = Company_Market_Cap_USD / 1000,
+    tobin_q = (`Assets_-_Total` - `Common/Ordinary_Equity_-_Total` + Market_Equity) / `Assets_-_Total` /1000,
     Leverage = (`Debt_in_Current_Liabilities_-_Total` + `Long-Term_Debt_-_Total`) / `Assets_-_Total`,
     ROE = `Net_Income__Loss` / `Common/Ordinary_Equity_-_Total`,
     Dividend_yield = `Dividends_per_Share_-_Ex-Date_-_Fiscal` / `Price_Close_-_Annual_-_Calendar` * 100,
     Size = log(1+`Sales/Turnover__Net`),
-    Cash = `Cash_and_Short-Term_Investments` / `Assets_-_Total`,
-    Advertising = Advertising_Expense / `Assets_-_Total`,
     ESG = ESG_Score_FY2018 / 100
   )
 
@@ -199,13 +212,13 @@ summary_vars <- Full_data_set %>%
   select(
     TICKER,
     quarterly_abn_ret, 
-    ESG, 
+    `ESG_Score_FY2018`, 
     tobin_q, 
     Size, 
-    Cash, 
+    `Cash_and_Short-Term_Investments`, 
     Leverage, 
     ROE, 
-    Advertising, 
+    Advertising_Expense, 
     hist_vol, 
     Dividend_yield, 
     vol, 
@@ -216,10 +229,10 @@ summary_vars <- Full_data_set %>%
   mutate(across(
     c(tobin_q, 
       Size, 
-      Cash, 
+      `Cash_and_Short-Term_Investments`, 
       Leverage, 
       ROE, 
-      Advertising),
+      Advertising_Expense),
     \(x) winsorize(x, p = 0.01)
   ))
 
@@ -251,3 +264,5 @@ summary_stats <- summary_stats %>%
   mutate(across(where(is.numeric), ~ round(.x, 3)))
 
 knitr::kable(summary_stats, caption = "Table 1: Summary Statistics")
+```
+
