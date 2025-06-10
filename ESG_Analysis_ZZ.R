@@ -126,12 +126,16 @@ quarterly_abn_ret <- stock_data %>%
 # When need to take the average per company for the abnormal returns and caluclate
 # the volatilities for the time series
 
+Historic_volatility <- stock_data %>%
+  group_by(TICKER) %>%
+  summarise(
+    hist_vol = sd(log_ret[ date >= as.Date("2019-01-01") & date <= as.Date("2020-01-01")], na.rm = TRUE) * sqrt(252)             
+  )
+
 daily_abn_ret_stats <- daily_abn_ret %>%
   group_by(TICKER) %>%
   summarise(
     n_obs_daily = n(),                                   
-    hist_vol = sd(stock_data$log_ret[
-      stock_data$date >= as.Date("2019-01-01") & stock_data$date <= as.Date("2020-01-01")], na.rm = TRUE) * sqrt(252),             
     vol = sd(log_ret, na.rm = TRUE) *sqrt(4),           
     idio_vol = sd(abn_log_ret, na.rm = TRUE)*sqrt(4),          
     daily_avg_abn_ret = mean(abn_log_ret, na.rm = TRUE) *100,   
@@ -146,7 +150,8 @@ quarterly_abn_ret_stats <- quarterly_abn_ret %>%
     .groups = "drop"
   )
 
-stock_stats_df <- left_join(daily_abn_ret_stats, quarterly_abn_ret_stats, by = "TICKER")
+stock_stats_df <- left_join(daily_abn_ret_stats, Historic_volatility)
+stock_stats_df <- left_join(stock_stats_df, quarterly_abn_ret_stats, by = "TICKER")
 
 ## 6. Join all three data frames now
 
@@ -251,3 +256,16 @@ summary_stats <- summary_stats %>%
   mutate(across(where(is.numeric), ~ round(.x, 3)))
 
 knitr::kable(summary_stats, caption = "Table 1: Summary Statistics")
+
+
+
+
+##### Question 3 ########
+
+## 1. Cumulative Abnormal Log Returns
+
+daily_abn_ret <- daily_abn_ret %>%
+  group_by(TICKER) %>%
+  mutate(
+    cum_abn_log_ret = cumsum(abn_log_ret)
+  )
