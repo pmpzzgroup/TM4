@@ -129,7 +129,7 @@ daily_abn_ret_stats <- daily_abn_ret %>%
     hist_vol = sd(RET, na.rm = TRUE),              
     vol = sd(abn_log_ret, na.rm = TRUE),           
     idio_vol = sd(abn_log_ret, na.rm = TRUE),          
-    daily_avg_abn_ret = mean(abn_log_ret, na.rm = TRUE),   
+    daily_avg_abn_ret = exp(mean(abn_log_ret, na.rm = TRUE)) - 1,   
     .groups = "drop"
   )
 
@@ -137,7 +137,7 @@ quarterly_abn_ret_stats <- quarterly_abn_ret %>%
   group_by(TICKER) %>%
   summarise(
     n_obs_quarter = n(),                                   
-    quarterly_abn_ret = mean(qtr_abn_log_return, na.rm = TRUE), 
+    quarterly_abn_ret = exp(mean(qtr_abn_log_return, na.rm = TRUE)) - 1, 
     .groups = "drop"
   )
 
@@ -232,4 +232,26 @@ summary_stats <- summary_vars %>%
     names_to = c("Variable", ".value"),
     names_pattern = "^(.*)_(Obs|Mean|SD|25%|Median|75%)$"
   )
+
+
+# We create a data set with the quarterly abnormal returns, the ESG score, and the industry
+quarterly_esg_data <- Full_data_set %>%
+  select(TICKER, Company_Name.y, quarterly_abn_ret, ESG_Score_FY2018, TRBC_Industry_Name) %>%
+  filter(!is.na(quarterly_abn_ret) & !is.na(ESG_Score_FY2018) & !is.na(TRBC_Industry_Name))
+
+# Regress the quarterly abnormal returns on the ESG score
+esg_regression <- lm(quarterly_abn_ret ~ ESG_Score_FY2018, data = quarterly_esg_data)
+summary(esg_regression)
+
+# Regress the quarterly abnormal returns on the ESG score and industry_dummies
+industry_dummies <- model.matrix(~ TRBC_Industry_Name - 1, data = quarterly_esg_data)
+esg_industry_regression <- lm(quarterly_abn_ret ~ ESG_Score_FY2018 + industry_dummies, data = quarterly_esg_data)
+summary(esg_industry_regression)
+
+# Regress the quarterly abnormal returns on the ESG score, firm controls, and industry dummies
+firm_controls <- c("tobin_q", "Company_Market_Cap_USD", "Cash_and_Short-Term_Investments", 
+                     "Leverage", "ROE", "Advertising_Expense", "hist_vol", "Dividend_yield")
+
+quarterly_esg_controls_data 
+
 
