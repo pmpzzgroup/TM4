@@ -252,6 +252,80 @@ summary(esg_industry_regression)
 firm_controls <- c("tobin_q", "Company_Market_Cap_USD", "Cash_and_Short-Term_Investments", 
                      "Leverage", "ROE", "Advertising_Expense", "hist_vol", "Dividend_yield")
 
-quarterly_esg_controls_data 
+quarterly_esg_controls_data <- Full_data_set %>%
+  select(TICKER, quarterly_abn_ret, ESG_Score_FY2018, TRBC_Industry_Name, all_of(firm_controls)) %>%
+  filter(!is.na(quarterly_abn_ret) & !is.na(ESG_Score_FY2018) & !is.na(TRBC_Industry_Name))
+
+# remove rows with NAs
+quarterly_esg_controls_data <- quarterly_esg_controls_data %>%
+  filter(complete.cases(.))
+
+# Change the column name "Cash_and_Short-Term_Investments" to "Cash_and_Short_Term_Investments"
+quarterly_esg_controls_data <- quarterly_esg_controls_data %>%
+  rename(Cash_and_Short_Term_Investments = `Cash_and_Short-Term_Investments`)
+
+# Regress the quarterly abnormal returns on the ESG, firm controls, and industry dummies
+esg_firm_controls_regression <- lm(
+  quarterly_abn_ret ~ ESG_Score_FY2018 + 
+    tobin_q + Company_Market_Cap_USD + 
+    Cash_and_Short_Term_Investments + 
+    Leverage + ROE + Advertising_Expense + 
+    hist_vol + Dividend_yield + 
+    TRBC_Industry_Name, 
+  data = quarterly_esg_controls_data
+)
+summary(esg_firm_controls_regression)
+str(quarterly_esg_controls_data)
+
+# Step 1: Install and load the stargazer package if you haven't already
+if (!require("stargazer")) install.packages("stargazer")
+library(stargazer)
+
+# Step 2: Assume your three regression models have been created
+# esg_regression <- lm(...)
+# esg_industry_regression <- lm(...)
+# esg_firm_controls_regression <- lm(...)
+
+# Step 3: Place your models into a list for stargazer
+model_list <- list(esg_regression, esg_industry_regression, esg_firm_controls_regression)
+
+# Step 4: Create a vector of labels for the final table.
+# The order must match the sequence of variables across your models.
+# Note: The variable name for firm size is 'Company_Market_Cap_USD' and for cash is
+# 'Cash_and_Short_Term_Investments' as per your regression code.
+covariate_labels <- c("ES", "Tobin's q", "Size", "Cash", "Leverage", "ROE",
+                      "Advertising", "Historical volatility", "Dividend")
+
+# Step 5: Generate the table
+stargazer(
+  model_list,
+  type = "text", # Use "html" or "latex" for reports; "text" for console output
+  title = "Cross-sectional regressions for quarterly abnormal returns",
+  
+  # --- Column & Row Labels ---
+  column.labels = c("(1)", "(2)", "(3)"),
+  covariate.labels = covariate_labels,
+  dep.var.labels.include = FALSE, # We will add the dependent var manually
+  
+  # --- Statistics Reporting ---
+  # By default, stargazer shows standard errors. The t-statistic is shown
+  # in the image, but stargazer does not have a simple switch for this.
+  # For simplicity, this code shows standard errors, which is standard practice.
+  # To show t-stats, you would need to calculate them manually and pass them to the 'se' argument.
+  
+  # --- Table Content & Layout ---
+  omit = c("Constant", "industry_dummies", "TRBC_Industry_Name"), # Hide intercept and fixed effects coefficients
+  add.lines = list(c("Industry FE", "No", "Yes", "Yes")),
+  align = TRUE,
+  
+  # --- Model Statistics to Include ---
+  keep.stat = c("n", "adj.rsq"), # Show number of observations and Adj. R-squared
+  
+  # --- Notes and Significance Stars ---
+  star.cutoffs = c(0.1, 0.05, 0.01), # p-value thresholds for *, **, ***
+  notes.align = "l",
+  notes = "Standard errors are in parentheses.",
+  notes.append = TRUE
+)
 
 
